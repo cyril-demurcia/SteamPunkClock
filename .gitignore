@@ -1,0 +1,49 @@
+##############################
+#  ESP-IDF / ESP32
+##############################
+build/
+.pio
+sdkconfig.old
+sdkconfig.bak
+*.bin
+*.elf
+*.map
+*.d
+*.old
+
+# ESP-IDF generated files 
+dependencies.lock
+managed_components/
+idf_component.yml.lock
+
+################
+# Python / ESP-IDF tools
+__pycache__/
+*.__pycache__
+.venv/
+env/
+
+############################
+#  VS Code
+############################
+.vscode/.browse.VC.db*
+.vscode/ipch/
+.vscode/.ropeproject/
+
+# Generated files
+.vscode/settings.json
+.vscode/launch.json
+.vscode/.cortex-debug*
+
+# Clab / LSP
+.clangd/
+compile_commands.json
+
+.devcontainer/.env
+.devcontainer/.cache
+
+# LOGS
+*.log
+
+# Node / Frontend
+

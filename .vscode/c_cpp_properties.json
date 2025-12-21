@@ -1,0 +1,32 @@
+{
+  "configurations": [
+    {
+      "name": "ESP-IDF",
+      "compilerPath": "${config:idf.toolsPath}/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-gcc",
+      "compileCommands": "${config:idf.buildPath}/compile_commands.json",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${env:IDF_PATH}/components/**",
+        "${env:IDF_PATH}/components/esp_timer/include",
+        "${env:IDF_PATH}/components/mqtt/esp-mqtt/include",
+        "${env:IDF_PATH}/components/esp_adc/include",
+        "${env:IDF_PATH}/components/esp_adc/include/esp_adc",
+        "${env:IDF_PATH}/components/esp_common/include",
+        //"${workspaceFolder}/build/**"
+        //"${config:idf.espIdfPath}/components/**",
+        //"${config:idf.espIdfPath}/components/esp_timer/include",
+        //"${config:idf.espIdfPathWin}/components/**",
+        "${workspaceFolder}/**"
+      ],
+      "browse": {
+        "path": [
+          "${config:idf.espIdfPath}/components",
+          "${config:idf.espIdfPathWin}/components",
+          "${workspaceFolder}"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      }
+    }
+  ],
+  "version": 4
+}
