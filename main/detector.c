@@ -147,7 +147,6 @@ static void perfomCalibration() {
     }
     ambient_mean_mv = (ambient_count > 0) ? (ambient_sum / ambient_count) : 0.0;
     ESP_LOGI(TAG, "Ambient mean (mV): %.2f (samples=%d)", ambient_mean_mv, ambient_count);
-
 }
 /* Task capteur : échantillonne, calcule RMS et détecte tic */
 static void sensor_task(void *arg)
@@ -178,8 +177,9 @@ static void sensor_task(void *arg)
 
         // adaptation lente du baseline_noise
         baseline_noise = baseline_noise * 0.99 + rms * 0.01;
+        // Threshold est le seuil de declenchement 
         // *5 à l'origine, testé manuellement a *3 et test sur l'horloge à *1
-        double threshold = baseline_noise * 1.6;
+        double threshold = baseline_noise * 3;
         if (threshold < 0.003) threshold = 0.003; // floor
      
         uint64_t now_ms = esp_timer_get_time() / 1000ULL;
@@ -209,6 +209,7 @@ static void IRAM_ATTR timerCallback(void *arg)
     if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
 }
 
+// Start periodic timer that read values to push them into sample Queue
 void startAdcSampling()
 {
     const esp_timer_create_args_t timer_args = {
