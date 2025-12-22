@@ -19,13 +19,13 @@
 
 // CONFIG
 #define SAMPLE_RATE_HZ      8000    // Hz
-#define WINDOW_MS           20      // ms pour RMS
+#define WINDOW_MS           4      // ms pour RMS
 #define DEBOUNCE_MS         250     // ms
-#define CALIBRATION_SECONDS 5       // mesurer bruit au démarrage
+#define HP_ALPHA 0.90
 
 // ADC mapping: ADC unit 1, channel 0 -> GPIO36 sur la plupart des ESP32
 #define ADC_UNIT_ID         ADC_UNIT_1
-#define ADC_IN_CHANNEL ADC_CHANNEL_0   // ADC1_CH0 (GPIO36)
+#define ADC_IN_CHANNEL      ADC_CHANNEL_0   // ADC1_CH0 (GPIO36)
 #define ADC_ATTEN           ADC_ATTEN_DB_12
 #define ADC_BITWIDTH        ADC_BITWIDTH_DEFAULT
 
@@ -124,72 +124,82 @@ static esp_err_t convert_raw_to_mv(int raw, int *out_mv)
     }
 }
 
-static void perfomCalibration() {
-        const int samplesPerWindow = (SAMPLE_RATE_HZ * WINDOW_MS) / 1000;
-    ESP_LOGI(TAG, "sensor: sampleRate=%d Hz, window=%d samples", SAMPLE_RATE_HZ, samplesPerWindow);
-
-    // Calibration initiale bruit (mesure moyenne en mV)
-    ESP_LOGI(TAG, "Calibration: measuring ambient for %d s...", CALIBRATION_SECONDS);
-    uint64_t cal_deadline = esp_timer_get_time() + (CALIBRATION_SECONDS * 1000000ULL);
-
-    while (esp_timer_get_time() < cal_deadline) {
-        int raw;
-        esp_err_t ret = adc_oneshot_read(adc_handle, ADC_IN_CHANNEL, &raw);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "adc read (cal) failed: %s", esp_err_to_name(ret));
-        } else {
-            int mv;
-            convert_raw_to_mv(raw, &mv);
-            ambient_sum += mv;
-            ambient_count++;
-        }
-        esp_rom_delay_us(1000); // 1kHz pendant calibration
-    }
-    ambient_mean_mv = (ambient_count > 0) ? (ambient_sum / ambient_count) : 0.0;
-    ESP_LOGI(TAG, "Ambient mean (mV): %.2f (samples=%d)", ambient_mean_mv, ambient_count);
-}
 /* Task capteur : échantillonne, calcule RMS et détecte tic */
 static void sensor_task(void *arg)
 {
     const int samplesPerWindow = (SAMPLE_RATE_HZ * WINDOW_MS) / 1000;
 
-    double baseline_noise = 0.0;
+    double baseline_noise = 0.001;
+    double prev_x = 0.0;
+    double prev_y = 0.0;
     uint64_t last_detect_ms = 0;
+
+    // Pre calibration pendant 2 seconde
+    ESP_LOGI(TAG, "=============== Micro calibration ================");
+    ambient_mean_mv = 0;
+    for (int i = 0; i < 2*SAMPLE_RATE_HZ; i++) { // 2 s à 8 kHz
+        int raw;
+        xQueueReceive(SamplesQueue, &raw, portMAX_DELAY);
+        int mv;
+        convert_raw_to_mv(raw, &mv);
+        ambient_mean_mv += mv;
+    }
+    ambient_mean_mv = ambient_mean_mv / (2.0*SAMPLE_RATE_HZ);
+    ESP_LOGI(TAG, "=============== Ambient mean %.6e ================", ambient_mean_mv);
 
     ESP_LOGI(TAG, "=============== Starting Listening Tic/Tacs ================");
     while (1) {
-        double sumsq = 0.0;
-
-        // Get samples from Queue
+        
         int adcSamples[samplesPerWindow];
         for (int i = 0; i < samplesPerWindow; i++) {
             xQueueReceive(SamplesQueue, &adcSamples[i], portMAX_DELAY);
         }
-        // Process Samples
-        for (int i = 0; i < samplesPerWindow; ++i) {
+        
+        double energy = 0.0;
+        
+        for (int i = 0; i < samplesPerWindow; i++) {
             int mv;
             convert_raw_to_mv(adcSamples[i], &mv);
-            // centrer par rapport à ambient_mean_mv
-            double x = ((double)mv - ambient_mean_mv) / 1000.0; // convert to V
-            sumsq += x * x;
+            
+            // 1️⃣ Centrage
+            double x = ((double)mv - ambient_mean_mv) / 1000.0; // V
+            
+            // 2️⃣ Passe-haut 1er ordre
+            double y = HP_ALPHA * (prev_y + x - prev_x);
+            prev_x = x;
+            prev_y = y;
+            
+            // 3️⃣ Énergie
+            energy += y * y;
         }
-        double rms = sqrt(sumsq / (double)samplesPerWindow); // V
-
-        // adaptation lente du baseline_noise
-        baseline_noise = baseline_noise * 0.99 + rms * 0.01;
-        // Threshold est le seuil de declenchement 
-        // *5 à l'origine, testé manuellement a *3 et test sur l'horloge à *1
-        double threshold = baseline_noise * 3;
-        if (threshold < 0.003) threshold = 0.003; // floor
-     
+        
+        // 4️⃣ Baseline lente (seulement hors événement)
+        double energy_norm = energy / samplesPerWindow;
+        
+        double COEF_MAGIQUE = 10.0;
+        double threshold = baseline_noise * COEF_MAGIQUE;
+        if (threshold < 1e-6) threshold = 1e-6;
+        
         uint64_t now_ms = esp_timer_get_time() / 1000ULL;
-        if (rms > threshold && (now_ms - last_detect_ms) > DEBOUNCE_MS) {
-            last_detect_ms = now_ms;
-            ESP_LOGI(TAG, "Tick detected: rms=%.6fV threshold=%.6fV", rms, threshold);
-            uint32_t t = (uint32_t)now_ms;
-            xQueueSend(TictacQueue, &t, 0);
+        
+        if (energy_norm < threshold) {
+            baseline_noise = baseline_noise * 0.99 + energy_norm * 0.01;
         }
-    }
+        
+        // 5️⃣ Détection
+        if (energy_norm > threshold &&
+            (now_ms - last_detect_ms) > DEBOUNCE_MS) {
+                
+                last_detect_ms = now_ms;
+                
+                ESP_LOGI(TAG,
+                    "TIC/TAC energy=%.6e thr=%.6e baseline=%.6e",
+                    energy_norm, threshold, baseline_noise);
+                    
+                    uint32_t t = (uint32_t)now_ms;
+                    xQueueSend(TictacQueue, &t, 0);
+                }
+            }
 }
 
 static void IRAM_ATTR timerCallback(void *arg)
@@ -247,8 +257,6 @@ void startTicTacProcessing()
         ESP_LOGE(TAG, "Failed to create SAMPLE_QUEUE");
         return;
     }
-    // Perform Calibration to compute Ambien mean Mv
-    perfomCalibration();
 
     // Start reading from ADC
     startAdcSampling();
