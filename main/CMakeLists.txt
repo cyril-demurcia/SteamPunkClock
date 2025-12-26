@@ -1,7 +1,7 @@
 idf_component_register(SRCS "TicTac.c" "TicTac.h" "mqtt.c" "esp_rest_main.c"
                             "rest_server.c"
                             "detector.c"
-                    PRIV_REQUIRES esp_http_server esp_driver_gpio fatfs json spiffs nvs_flash esp_timer esp_adc mqtt
+                    PRIV_REQUIRES esp_http_server esp_driver_gpio fatfs json spiffs nvs_flash esp_timer esp_adc esp_wifi mqtt
                     INCLUDE_DIRS ".")
 
 if(CONFIG_EXAMPLE_WEB_DEPLOY_SF)

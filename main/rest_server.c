@@ -69,6 +69,7 @@ ClockTime_t readTimeFromNvs() {
 }
 
 /* Simple handler for light brightness control */
+// Passer une Payload Json { "hours" : 12, "minutes" : 24 }
 static esp_err_t time_post_handler(httpd_req_t *req)
 {
     int total_len = req->content_len;
@@ -108,14 +109,82 @@ static esp_err_t time_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
     cJSON *root = cJSON_CreateObject();
-    esp_chip_info_t chip_info;
-    esp_chip_info(&chip_info);
     cJSON_AddNumberToObject(root, "hours", clockTimeReference.hours);
     cJSON_AddNumberToObject(root, "minutes", clockTimeReference.minutes);
     const char *timeInfo = cJSON_Print(root);
     httpd_resp_sendstr(req, timeInfo);
     free((void *)timeInfo);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Exemple de requete post api/v1/time?hours=07&minutes=25
+// Exemple de requete post api/v1/time?hours=12&minutes=05
+// Hours : [01 ..23]
+// Minutes : [00 .. 59]
+esp_err_t time_param_post_handler(httpd_req_t *req)
+{
+    int hours = 0;
+    int minutes = 0;
+    char query[128];
+
+    // Récupération de la query string (?a=1&b=2)
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char hoursStr[4];
+        char minutesStr[4];
+
+        // Lire le paramètre "state"
+        if (httpd_query_key_value(query, "hours", hoursStr, sizeof(hoursStr)) == ESP_OK) {
+            hours = atoi(hoursStr);
+            ESP_LOGI("POST", "hours = %d", hours);
+        }
+
+        // Lire le paramètre "brightness"
+        if (httpd_query_key_value(query, "minutes", minutesStr, sizeof(minutesStr)) == ESP_OK) {
+            minutes = atoi(minutesStr);
+            ESP_LOGI("POST", "minutes = %d", minutes);
+        }
+    } else {
+        ESP_LOGW("POST", "No query param");
+    }
+
+    saveTime(hours,minutes);
+
+    // Once time has be set, the number of tic must be reset to zero
+    ticTacNumbers = 0;
+    ESP_LOGI(REST_TAG, "Time: hours = %d, minutes = %d", clockTimeReference.hours, clockTimeReference.minutes);
+    // Réponse HTTP
+    httpd_resp_sendstr(req, "OK");
+    return ESP_OK;
+}
+
+// Exemple de requete post api/v1/filtering?alpha=90
+// alpha : [00 ..99]
+esp_err_t filtering_param_post_handler(httpd_req_t *req)
+{
+    const char* alphaParam = "alpha";
+    int alpha = 0;
+    char query[128];
+
+    // Récupération de la query string (?a=1&b=2)
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char alphaStr[4];
+
+        // Lire le paramètre "state"
+        if (httpd_query_key_value(query, alphaParam, alphaStr, sizeof(alphaStr)) == ESP_OK) {
+            alpha = atoi(alphaStr);
+            ESP_LOGI("POST", "alpha = %d", alpha);
+        }
+
+    } else {
+        ESP_LOGW("POST", "No query param");
+    }
+
+    ALPHA = (double)alpha / 100.0;
+
+    ESP_LOGI(REST_TAG, "Filtering: alpha = %f", ALPHA);
+    // Réponse HTTP
+    httpd_resp_sendstr(req, "OK");
     return ESP_OK;
 }
 
@@ -145,14 +214,31 @@ esp_err_t start_rest_server(const char *base_path)
     httpd_register_uri_handler(server, &time_get_uri);
 
     /* URI handler for light brightness control */
-    httpd_uri_t time_post_uri = {
-        .uri = "/api/v1/time",
+    httpd_uri_t timejson_post_uri = {
+        .uri = "/api/v1/jsonTime",
         .method = HTTP_POST,
         .handler = time_post_handler,
         .user_ctx = rest_context
     };
-    httpd_register_uri_handler(server, &time_post_uri);
+    httpd_register_uri_handler(server, &timejson_post_uri);
 
+    // API Rest avec query param
+    httpd_uri_t timeparam_post_uri = {
+    .uri      = "/api/v1/time",
+    .method   = HTTP_POST,
+    .handler  = time_param_post_handler,
+    .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &timeparam_post_uri);
+
+    // API Rest avec query param
+    httpd_uri_t filteringparam_post_uri = {
+    .uri      = "/api/v1/filtering",
+    .method   = HTTP_POST,
+    .handler  = filtering_param_post_handler,
+    .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &filteringparam_post_uri);
 
     return ESP_OK;
 err_start:

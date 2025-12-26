@@ -14,5 +14,8 @@ long ticTacNumbers = 0;
 // The value here is only used the first time. After the value is read from the Non Volatim Memory
 ClockTime_t clockTimeReference = {12,34};
 
+// Filter alpogorithm
+double ALPHA = 0.65;
+
 char* MQTT_SERVER_ADRESS = "homeassistant.local";
 int MQTT_PORT_NUMBER = 1883;

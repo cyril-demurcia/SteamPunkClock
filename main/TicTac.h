@@ -19,6 +19,10 @@ typedef struct  {
 
 extern ClockTime_t clockTimeReference;
 
+
+// Filter algorithm
+extern double ALPHA;
+
 extern char* MQTT_SERVER_ADRESS;
 extern int MQTT_PORT_NUMBER;
 

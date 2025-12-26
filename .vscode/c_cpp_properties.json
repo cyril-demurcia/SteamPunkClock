@@ -12,6 +12,7 @@
         "${env:IDF_PATH}/components/esp_adc/include",
         "${env:IDF_PATH}/components/esp_adc/include/esp_adc",
         "${env:IDF_PATH}/components/esp_common/include",
+        "${env:IDF_PATH}/components/esp_wifi/include",
         //"${workspaceFolder}/build/**"
         //"${config:idf.espIdfPath}/components/**",
         //"${config:idf.espIdfPath}/components/esp_timer/include",

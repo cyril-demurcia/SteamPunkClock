@@ -1,7 +1,37 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- |
+# Steam Punk Clock
 
-# MEMO
+## Rest API
+La base de l'URL est http://esp-home.local
+Ci dessous la liste des API disponible : 
+
+   - GET URL/api/v1/jsonTime : permet de lire l'heure courante. Renvoi un json comme ceci
+    ```
+     {
+        "hours" : 12,
+        "minutes" : 24
+     }
+     ```
+
+   - POST URL/api/v1/jsonTime : Permet de seter l'heure courante. Prend une Pay load en Json
+    ```
+     {
+        "hours" : 12,
+        "minutes" : 24
+     }
+    ```
+    - POST URL/api/v1/time?hours=12&minutes=24 : permet de fixer l'heure avec des Query params
+    Peut être testé avec Curl : 
+    ```
+    curl -X POST "http://esp-home.local/api/v1/time?hours=12&minutes=24"
+    ```
+
+    peut se tester avec 
+    - POST URL/api/v1/filtering?alpha=80 : permet de fixer le coefficiant du filtre passe haut
+    ```
+    curl -X POST "http://esp-home.local/api/v1/filtering?alpha=50"
+    ```
+
+# MDNS
 
 L'utilisation de MDNS permet de faire une resolution de nom de l'esp32.
 Ici l'esp est rendu visible en tant que esp-home.local
@@ -17,55 +47,14 @@ La method Set Time prend en payload un Json identique
 
 ## Overview
 
-This example mainly introduces how to implement a RESTful API server and HTTP server on ESP32, with a frontend browser UI.
-
-This example designs several APIs to fetch resources as follows:
-
-| API                        | Method | Resource Example                                      | Description                                                                              | Page URL |
-| -------------------------- | ------ | ----------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------- |
-| `/api/v1/system/info`      | `GET`  | {<br />version:"v4.0-dev",<br />cores:2<br />}        | Used for clients to get system information like IDF version, ESP32 cores, etc            | `/`      |
-| `/api/v1/temp/raw`         | `GET`  | {<br />raw:22<br />}                                  | Used for clients to get raw temperature data read from sensor                            | `/chart` |
-| `/api/v1/light/brightness` | `POST` | { <br />red:160,<br />green:160,<br />blue:160<br />} | Used for clients to upload control values to ESP32 in order to control LED’s brightness  | `/light` |
-
-**Page URL** is the URL of the webpage which will send a request to the API.
-
-### About mDNS
-
-The IP address of an IoT device may vary from time to time, so it’s impracticable to hard code the IP address in the webpage. In this example, we use the `mDNS` to parse the domain name `esp-home.local`, so that we can always get access to the web server by this URL no matter what the real IP address behind it. See [here](https://docs.espressif.com/projects/esp-idf/en/latest/api-reference/protocols/mdns.html) for more information about mDNS.
-
-**Notes: mDNS is installed by default on most operating systems or is available as separate package.**
-
-### About deploy mode
-
-In development mode, it would be awful to flash the whole webpages every time we update the html, js or css files. So it is highly recommended to deploy the webpage to host PC via `semihost` technology. Whenever the browser fetch the webpage, ESP32 can forward the required files located on host PC. By this mean, it will save a lot of time when designing new pages.
-
-After developing, the pages should be deployed to one of the following destinations:
-
-* SPI Flash - which is recommended when the website after built is small (e.g. less than 2MB).
-* SD Card - which would be an option when the website after built is very large that the SPI Flash have not enough space to hold (e.g. larger than 2MB).
-
-### About frontend framework
-
-Many famous frontend frameworks (e.g. Vue, React, Angular) can be used in this example. Here we just take [Vue](https://vuejs.org/) as example and adopt the [vuetify](https://vuetifyjs.com/) as the UI library.
-
-## How to use example
-
-### Hardware Required
-
-To run this example, you need an ESP32 dev board (e.g. ESP32-WROVER Kit, ESP32-Ethernet-Kit) or ESP32 core board (e.g. ESP32-DevKitC). An extra JTAG adapter might also needed if you choose to deploy the website by semihosting. For more information about supported JTAG adapter, please refer to [select JTAG adapter](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/jtag-debugging/index.html#jtag-debugging-selecting-jtag-adapter). Or if you choose to deploy the website to SD card, an extra SD slot board is needed.
 
 #### Pin Assignment:
 
 Only if you deploy the website to SD card, then the following pin connection is used in this example.
 
-| ESP32  | SD Card |
-| ------ | ------- |
-| GPIO2  | D0      |
-| GPIO4  | D1      |
-| GPIO12 | D2      |
-| GPIO13 | D3      |
-| GPIO14 | CLK     |
-| GPIO15 | CMD     |
+| ESP32  | SD Card   |
+| ------ | -------   |
+| GPI36  | Analog in |
 
 
 ### Configure the project

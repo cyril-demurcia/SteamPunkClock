@@ -21,7 +21,6 @@
 #define SAMPLE_RATE_HZ      8000    // Hz
 #define WINDOW_MS           4      // ms pour RMS
 #define DEBOUNCE_MS         250     // ms
-#define HP_ALPHA 0.90
 
 // ADC mapping: ADC unit 1, channel 0 -> GPIO36 sur la plupart des ESP32
 #define ADC_UNIT_ID         ADC_UNIT_1
@@ -63,7 +62,7 @@ static esp_err_t adc_oneshot_init(void)
         ESP_LOGE(TAG, "adc_oneshot_new_unit failed: %s", esp_err_to_name(ret));
         return ret;
     }
-
+    
     adc_oneshot_chan_cfg_t config = {
         .bitwidth = ADC_BITWIDTH,
         .atten = ADC_ATTEN,
@@ -85,7 +84,7 @@ static esp_err_t adc_cali_init(void)
     adc_cali_scheme_ver_t param; // Parametre de retour
     esp_err_t error = adc_cali_check_scheme(&param);
     ESP_LOGI(TAG, "adc_cali_check_scheme -> 0x%X", (unsigned)error);
-
+    
     // essayer line fitting en priorité si supporté
     if (error == ESP_OK && param == ADC_CALI_SCHEME_VER_LINE_FITTING) {
         adc_cali_line_fitting_config_t cali_config = {
@@ -101,7 +100,7 @@ static esp_err_t adc_cali_init(void)
             ESP_LOGW(TAG, "adc_cali_create_scheme_line_fitting failed: %s", esp_err_to_name(ret));
         }
     }
-
+    
     // si aucun scheme disponible, renvoyer erreur (on peut continuer sans calibration mais moins précis)
     ESP_LOGW(TAG, "No ADC calibration scheme available; readings will be raw (un-calibrated)");
     adc_cali_handle = NULL;
@@ -128,12 +127,12 @@ static esp_err_t convert_raw_to_mv(int raw, int *out_mv)
 static void sensor_task(void *arg)
 {
     const int samplesPerWindow = (SAMPLE_RATE_HZ * WINDOW_MS) / 1000;
-
+    
     double baseline_noise = 0.001;
     double prev_x = 0.0;
     double prev_y = 0.0;
     uint64_t last_detect_ms = 0;
-
+    
     // Pre calibration pendant 2 seconde
     ESP_LOGI(TAG, "=============== Micro calibration ================");
     ambient_mean_mv = 0;
@@ -146,7 +145,7 @@ static void sensor_task(void *arg)
     }
     ambient_mean_mv = ambient_mean_mv / (2.0*SAMPLE_RATE_HZ);
     ESP_LOGI(TAG, "=============== Ambient mean %.6e ================", ambient_mean_mv);
-
+    
     ESP_LOGI(TAG, "=============== Starting Listening Tic/Tacs ================");
     while (1) {
         
@@ -165,7 +164,7 @@ static void sensor_task(void *arg)
             double x = ((double)mv - ambient_mean_mv) / 1000.0; // V
             
             // 2️⃣ Passe-haut 1er ordre
-            double y = HP_ALPHA * (prev_y + x - prev_x);
+            double y = ALPHA * (prev_y + x - prev_x);
             prev_x = x;
             prev_y = y;
             
@@ -198,20 +197,20 @@ static void sensor_task(void *arg)
                     
                     uint32_t t = (uint32_t)now_ms;
                     xQueueSend(TictacQueue, &t, 0);
-                }
-            }
+        }
+    }
 }
-
+        
 static void IRAM_ATTR timerCallback(void *arg)
 {
     int raw;
     esp_err_t r = adc_oneshot_read(adc_handle, ADC_IN_CHANNEL, &raw);
-
+    
     if (r != ESP_OK) {
-    ESP_LOGI(TAG, "     Error reading sample");
-    // en cas d'erreur, skip
-    raw = 0;
-}
+        ESP_LOGI(TAG, "     Error reading sample");
+        // en cas d'erreur, skip
+        raw = 0;
+    }
 
     // mettre dans un buffer FIFO (ring buffer ou queue)
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -229,10 +228,10 @@ void startAdcSampling()
     };
     esp_timer_handle_t h;
     esp_timer_create(&timer_args, &h);
-
+    
     // 8 kHz → période = 125 µs = sampleDelayUs
     const int sampleDelayUs = 1000000 / SAMPLE_RATE_HZ;
-
+    
     esp_timer_start_periodic(h, sampleDelayUs);
 }
 
@@ -246,10 +245,10 @@ void startTicTacProcessing()
         ESP_LOGE(TAG, "Failed to create queue");
         return;
     }
-
+    
     ESP_ERROR_CHECK(adc_oneshot_init());
     ESP_ERROR_CHECK(adc_cali_init());
-
+    
     // taille de la queue : ici, on stocke 1024 échantillons max
     // Il s'agit de la queue qui va être remplie par lecture adc_one_shot dans le timer sur interruption
     SamplesQueue = xQueueCreate(1024, sizeof(int));
@@ -257,11 +256,11 @@ void startTicTacProcessing()
         ESP_LOGE(TAG, "Failed to create SAMPLE_QUEUE");
         return;
     }
-
+    
     // Start reading from ADC
     startAdcSampling();
-
+    
     // create sensor task that read pinned to core 1
     xTaskCreate(sensor_task, "sensor_task", 4096, NULL, 5, NULL);
-
+    
 }
