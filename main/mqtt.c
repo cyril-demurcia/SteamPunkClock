@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "TicTac.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 
 static esp_mqtt_client_handle_t client = NULL;
@@ -13,38 +14,81 @@ static bool mqtt_connected = false;
 // -----------------------------
 // TOPICS
 // -----------------------------
-const char* DISCOVERY_TOPIC = "homeassistant/sensor/horloge/config";
+const char* CLOCK_DISCOVERY_TOPIC = "homeassistant/sensor/horloge_time/config";
+const char* CLOCK_RATIO_DISCOVERY_TOPIC = "homeassistant/sensor/horloge_ratio/config";
 const char* STATE_TOPIC     = "Horloge";
 
- const char* DISCOVERY_PAYLOAD = 
-        "{"
-          "\"name\": \"Horloge\","
-          "\"unique_id\": \"mqtt_horloge_sensor\","
-          "\"state_topic\": \"Horloge\","
-          "\"value_template\": \"{{ value_json.time }}\","
-          "\"icon\": \"mdi:clock-digital\""
-        "}";
+        // Déclaration MQTT Discovery pour le sensor "Horloge" (time)
+void declareClockTimeSensor()
+{
+    cJSON *root = cJSON_CreateObject();
 
+    // Propriétés du sensor
+    cJSON_AddStringToObject(root, "name", "Horloge");
+    cJSON_AddStringToObject(root, "unique_id", "mqtt_horloge_time_sensor");
+    cJSON_AddStringToObject(root, "state_topic", STATE_TOPIC); // "Horloge"
+    cJSON_AddStringToObject(root, "value_template", "{{ value_json.time }}");
+    cJSON_AddStringToObject(root, "icon", "mdi:clock-digital");
+    cJSON_AddStringToObject(root, "unit_of_measurement", ""); // pas obligatoire ici
+    cJSON_AddStringToObject(root, "state_class", "measurement"); // utile pour l’historique
+
+    // Bloc device pour regrouper les sensors
+    cJSON *device = cJSON_CreateObject();
+    cJSON_AddStringToObject(device, "identifiers", "esp32_horloge_01");
+    cJSON_AddStringToObject(device, "name", "ESP32 Horloge");
+    cJSON_AddStringToObject(device, "manufacturer", "Custom");
+    cJSON_AddStringToObject(device, "model", "ESP32");
+
+    cJSON_AddItemToObject(root, "device", device);
+
+    // Générer le payload JSON
+    char *payload = cJSON_PrintUnformatted(root);
+
+    // Publier sur le topic MQTT Discovery avec retain=true
+    esp_mqtt_client_publish(client,
+                            CLOCK_DISCOVERY_TOPIC, // "homeassistant/sensor/horloge_time/config"
+                            payload,
+                            0,
+                            1,  // QoS 1
+                            true);  // retain
+
+    // Libérer la mémoire
+    cJSON_Delete(root);
+    free(payload);
+
+    ESP_LOGI(TAG, "Horloge Time sensor declared via MQTT Discovery");
+}
 
 /**
  * To declare a new device to MQTT Broker, publish for example, the following JSON declaration
- * {
- *  "name": "Horloge",
- *  "unique_id": "mqtt_horloge_sensor",
- *  "state_topic": "Horloge",
- *  "value_template": "{{ value_json.time }}"
- *  "icon": "mdi:clock-digital"
- * }
- * IMPORTANT : The message must be sent mode with retain=true
+ * IMPORTANT : The message must be sent with mode  retain=true
  */
-void declareDeviceToMqttBroker() {
-    ESP_LOGI(TAG, "     Declaring device to Broker : %s", DISCOVERY_PAYLOAD);
-    esp_mqtt_client_publish(client,
-                            DISCOVERY_TOPIC,
-                            DISCOVERY_PAYLOAD,
-                            0,
-                            1,   // Qos = 1 (avec acquittement)
-                            true);  // retain = true
+void declareDeviceSensor() {
+
+    // Declaration du bloc Ratio
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "name", "Ratio Second");
+    cJSON_AddStringToObject(root, "unique_id", "mqtt_ratio_sec_sensor");
+    cJSON_AddStringToObject(root, "state_topic", STATE_TOPIC);
+    cJSON_AddStringToObject(root, "value_template", "{{ value_json.ratio_sec }}");
+    cJSON_AddStringToObject(root, "icon", "mdi:clock-digital");
+    cJSON_AddStringToObject(root, "unit_of_measurement", "%");
+    cJSON_AddStringToObject(root, "state_class", "measurement");
+
+    // Bloc device
+    cJSON *device = cJSON_CreateObject();
+    cJSON_AddStringToObject(device, "identifiers", "esp32_horloge_01");
+    cJSON_AddStringToObject(device, "name", "ESP32 Horloge");
+    cJSON_AddStringToObject(device, "manufacturer", "Custom");
+    cJSON_AddStringToObject(device, "model", "ESP32");
+
+    cJSON_AddItemToObject(root, "device", device);
+
+    char *payload = cJSON_PrintUnformatted(root);
+    esp_mqtt_client_publish(client, CLOCK_RATIO_DISCOVERY_TOPIC, payload, 0, 1, true);
+    cJSON_Delete(root);
+    free(payload);
+
 }
 
 void computeCurrentTime() {
@@ -68,7 +112,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             ESP_LOGI(TAG, "Connected to MQTT broker !");
             mqtt_connected = true;
             // Declare Device
-            declareDeviceToMqttBroker();
+            declareClockTimeSensor();
+            declareDeviceSensor();
             break;
 
         case MQTT_EVENT_DISCONNECTED:
@@ -86,9 +131,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-
-
-void publishTime()
+void publish(float ratio)
 {
     
     if (client == NULL || mqtt_connected == false) {
@@ -100,22 +143,26 @@ void publishTime()
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "time", currentTime);
+    cJSON_AddNumberToObject(root, "ratio_sec", (int)(ratio*100.0));
     // exemple garde ci besoins cJSON_AddNumberToObject(root, "minutes", clockTimeReference.minutes);
-    char *timeInfo = cJSON_Print(root);
+    char *json = cJSON_Print(root);
 
     
     ESP_LOGI(TAG, "     publishing : %s", currentTime);
     esp_mqtt_client_publish(client,
                             STATE_TOPIC,
-                            timeInfo,
+                            json,
                             0,
                             0,   // QOS mettre 0 pour ne pas attendre l'acquittement
                             false);  // retain = false 
     cJSON_Delete(root); 
-    free(timeInfo);
+    free(json);
 }
 
 void startListeningTicTacs(void *arg) {
+
+    int64_t lastTime = esp_timer_get_time();
+    int64_t currentTime = lastTime;
 
     // consumer loop: affiche les tic et tacs reçus
     while (true) {
@@ -123,9 +170,14 @@ void startListeningTicTacs(void *arg) {
         uint32_t ts;
         if (TictacQueue != NULL && xQueueReceive(TictacQueue, &ts, pdMS_TO_TICKS(1000))) {
             ESP_LOGI(TAG, "Tick @ %u ms (queue)", ts);
+            currentTime = esp_timer_get_time();
+            float ratio = (float)(currentTime - lastTime)/1000000.0; // timer est en micro
+            publish(ratio);
+            lastTime = currentTime;
+
             // ici: notifier MQTT
             ticTacNumbers++;
-            publishTime();
+            publish(ratio);
             // IMPORTANT pour laisser respirer (IDLE)
             vTaskDelay(pdMS_TO_TICKS(10));   
             ESP_LOGI("HEAP", "free heap: %u", esp_get_free_heap_size());
