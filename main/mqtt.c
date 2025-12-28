@@ -29,8 +29,6 @@ void declareClockTimeSensor()
     cJSON_AddStringToObject(root, "state_topic", STATE_TOPIC); // "Horloge"
     cJSON_AddStringToObject(root, "value_template", "{{ value_json.time }}");
     cJSON_AddStringToObject(root, "icon", "mdi:clock-digital");
-    cJSON_AddStringToObject(root, "unit_of_measurement", ""); // pas obligatoire ici
-    cJSON_AddStringToObject(root, "state_class", "measurement"); // utile pour l’historique
 
     // Bloc device pour regrouper les sensors
     cJSON *device = cJSON_CreateObject();
