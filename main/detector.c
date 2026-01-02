@@ -28,7 +28,15 @@
 #define ADC_ATTEN           ADC_ATTEN_DB_12
 #define ADC_BITWIDTH        ADC_BITWIDTH_DEFAULT
 
-static const char *TAG = "PIEZO_TICTAC (SENSOR)";
+static const char *TAG = "DETECTOR";
+
+// For calibration
+unsigned long nbMeasuresMade = 0;
+unsigned long nbTicTacDetected = 0;
+unsigned long nbMesauresSinceLastTic = 0;
+
+bool calibrationDone = true;
+unsigned long nbMeasuresForOneTic = 8100;
 
 // README
 // On ne peut pas faire une tache qui lit periodiquement les valeurs de l'ADC à 8kHz =>
@@ -83,7 +91,7 @@ static esp_err_t adc_cali_init(void)
     // vérifier les schemes supportés (optionnel mais utile)
     adc_cali_scheme_ver_t param; // Parametre de retour
     esp_err_t error = adc_cali_check_scheme(&param);
-    ESP_LOGI(TAG, "adc_cali_check_scheme -> 0x%X", (unsigned)error);
+    ESP_LOGD(TAG, "adc_cali_check_scheme -> 0x%X", (unsigned)error);
     
     // essayer line fitting en priorité si supporté
     if (error == ESP_OK && param == ADC_CALI_SCHEME_VER_LINE_FITTING) {
@@ -94,7 +102,7 @@ static esp_err_t adc_cali_init(void)
         };
         esp_err_t ret = adc_cali_create_scheme_line_fitting(&cali_config, &adc_cali_handle);
         if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "adc_cali: line fitting scheme created");
+            ESP_LOGD(TAG, "adc_cali: line fitting scheme created");
             return ESP_OK;
         } else {
             ESP_LOGW(TAG, "adc_cali_create_scheme_line_fitting failed: %s", esp_err_to_name(ret));
@@ -123,6 +131,22 @@ static esp_err_t convert_raw_to_mv(int raw, int *out_mv)
     }
 }
 
+unsigned long convertNbMeasuresToTic(unsigned long aNbMeasures)
+{
+    if (!calibrationDone || nbMeasuresForOneTic == 0) {
+        return 1;
+    }
+
+    unsigned long q = aNbMeasures / nbMeasuresForOneTic;
+    unsigned long r = aNbMeasures % nbMeasuresForOneTic;
+    if (r * 2 >= nbMeasuresForOneTic) {
+        q++;
+    }
+
+    return q;
+}
+
+
 /* Task capteur : échantillonne, calcule RMS et détecte tic */
 static void sensor_task(void *arg)
 {
@@ -134,7 +158,7 @@ static void sensor_task(void *arg)
     uint64_t last_detect_ms = 0;
     
     // Pre calibration pendant 2 seconde
-    ESP_LOGI(TAG, "=============== Micro calibration ================");
+    ESP_LOGD(TAG, "=============== Micro calibration ================");
     ambient_mean_mv = 0;
     for (int i = 0; i < 2*SAMPLE_RATE_HZ; i++) { // 2 s à 8 kHz
         int raw;
@@ -144,9 +168,9 @@ static void sensor_task(void *arg)
         ambient_mean_mv += mv;
     }
     ambient_mean_mv = ambient_mean_mv / (2.0*SAMPLE_RATE_HZ);
-    ESP_LOGI(TAG, "=============== Ambient mean %.6e ================", ambient_mean_mv);
+    ESP_LOGD(TAG, "=============== Ambient mean %.6e ================", ambient_mean_mv);
     
-    ESP_LOGI(TAG, "=============== Starting Listening Tic/Tacs ================");
+    ESP_LOGD(TAG, "=============== Starting Listening Tic/Tacs ================");
     while (1) {
         
         int adcSamples[samplesPerWindow];
@@ -190,13 +214,21 @@ static void sensor_task(void *arg)
             (now_ms - last_detect_ms) > DEBOUNCE_MS) {
                 
                 last_detect_ms = now_ms;
-                
-                ESP_LOGI(TAG,
+                if (!calibrationDone) {
+                    nbTicTacDetected++;
+                } 
+
+                ESP_LOGD(TAG,
                     "TIC/TAC energy=%.6e thr=%.6e baseline=%.6e",
                     energy_norm, threshold, baseline_noise);
                     
-                    uint32_t t = (uint32_t)now_ms;
+                ESP_LOGI(TAG, "nbMesauresSinceLastTic : %d --> Tics = %d ", nbMesauresSinceLastTic,convertNbMeasuresToTic(nbMesauresSinceLastTic));
+                uint32_t t = (uint32_t)now_ms;
+                // To get lost second after clock ring
+                for (int i=0; i< convertNbMeasuresToTic(nbMesauresSinceLastTic); i++) {
                     xQueueSend(TictacQueue, &t, 0);
+                }
+                nbMesauresSinceLastTic = 0;
         }
     }
 }
@@ -207,11 +239,21 @@ static void IRAM_ATTR timerCallback(void *arg)
     esp_err_t r = adc_oneshot_read(adc_handle, ADC_IN_CHANNEL, &raw);
     
     if (r != ESP_OK) {
-        ESP_LOGI(TAG, "     Error reading sample");
+        ESP_LOGD(TAG, "     Error reading sample");
         // en cas d'erreur, skip
         raw = 0;
     }
 
+    if (!calibrationDone) {
+        nbMeasuresMade++;
+        if (nbMeasuresMade / SAMPLE_RATE_HZ > 3*60) { // minutes
+            calibrationDone = true;
+            nbMeasuresForOneTic = nbMeasuresMade / nbTicTacDetected;
+            ESP_LOGD(TAG, " ======> Calibration is done. nb measures required for on Tic =  %d", nbMeasuresForOneTic);
+        }
+    } else {
+        nbMesauresSinceLastTic++;
+    }
     // mettre dans un buffer FIFO (ring buffer ou queue)
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xQueueSendFromISR(SamplesQueue, &raw, &xHigherPriorityTaskWoken);
@@ -239,7 +281,7 @@ void startAdcSampling()
 // -------------------
 void startTicTacProcessing()
 {
-    ESP_LOGI(TAG, "Starting piezo detector (IDF v5.x style)");
+    ESP_LOGD(TAG, "Starting piezo detector (IDF v5.x style)");
     TictacQueue = xQueueCreate(16, sizeof(uint32_t));
     if (!TictacQueue) {
         ESP_LOGE(TAG, "Failed to create queue");

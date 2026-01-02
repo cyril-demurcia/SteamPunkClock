@@ -7,7 +7,7 @@
 
 static esp_mqtt_client_handle_t client = NULL;
 
-static const char *TAG = "PIEZO_TICTAC (MQTT)";
+static const char *TAG = "MQTT";
 static char currentTime[9]; // HH:MM:SS
 static bool mqtt_connected = false;
 
@@ -54,7 +54,7 @@ void declareClockTimeSensor()
     cJSON_Delete(root);
     free(payload);
 
-    ESP_LOGI(TAG, "Horloge Time sensor declared via MQTT Discovery");
+    ESP_LOGD(TAG, "Horloge Time sensor declared via MQTT Discovery");
 }
 
 /**
@@ -91,7 +91,7 @@ void declareDeviceSensor() {
 
 void computeCurrentTime() {
     // Calculer les heures, minutes et secondes actuelles
-    long totalSeconds = clockTimeReference.hours * 3600 + clockTimeReference.minutes * 60 + ticTacNumbers;
+    long totalSeconds = clockTimeReference.hours * 3600 + clockTimeReference.minutes * 60 + ticTacNumbers * 615 / 600;
 
     unsigned int hours   = (totalSeconds / 3600) % 24;   // modulo 24 pour l'heure
     unsigned int minutes = (totalSeconds % 3600) / 60;
@@ -107,7 +107,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "Connected to MQTT broker !");
+            ESP_LOGD(TAG, "Connected to MQTT broker !");
             mqtt_connected = true;
             // Declare Device
             declareClockTimeSensor();
@@ -146,7 +146,7 @@ void publish(float ratio)
     char *json = cJSON_Print(root);
 
     
-    ESP_LOGI(TAG, "     publishing : %s", currentTime);
+    ESP_LOGD(TAG, "     publishing : %s", currentTime);
     esp_mqtt_client_publish(client,
                             STATE_TOPIC,
                             json,
@@ -167,7 +167,7 @@ void startListeningTicTacs(void *arg) {
  
         uint32_t ts;
         if (TictacQueue != NULL && xQueueReceive(TictacQueue, &ts, pdMS_TO_TICKS(1000))) {
-            ESP_LOGI(TAG, "Tick @ %u ms (queue)", ts);
+            ESP_LOGD(TAG, "Tick @ %u ms (queue)", ts);
             currentTime = esp_timer_get_time();
             float ratio = (float)(currentTime - lastTime)/1000000.0; // timer est en micro
             publish(ratio);
@@ -176,9 +176,10 @@ void startListeningTicTacs(void *arg) {
             // ici: notifier MQTT
             ticTacNumbers++;
             publish(ratio);
+
             // IMPORTANT pour laisser respirer (IDLE)
             vTaskDelay(pdMS_TO_TICKS(10));   
-            ESP_LOGI("HEAP", "free heap: %u", esp_get_free_heap_size());
+            //ESP_LOGD("HEAP", "free heap: %u", esp_get_free_heap_size());
         }
     }
 }
@@ -191,7 +192,7 @@ void mqtt_start()
 {
     
     // A rendre parametrable par API rest
-    ESP_LOGI(TAG, "Trying to establish connection with MQTT Server ...");
+    ESP_LOGD(TAG, "Trying to establish connection with MQTT Server ...");
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = "mqtt://homeassistant.local:1883",   // ton broker Mosquitto
         //.broker.address.uri = "mqtt://192.168.1.102:1883",   // ton broker Mosquitto
